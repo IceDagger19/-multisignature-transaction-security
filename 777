@@ -1,0 +1,154 @@
+from web3 import Web3
+from eth_account import Account
+
+# Connect to Ethereum node (Ganache or Infura/Alchemy)
+w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))  # Local Ganache URL or Infura/Alchemy URL
+
+# Check if connected to the node
+if not w3.isConnected():
+    raise Exception("Failed to connect to Ethereum node")
+
+# Multisignature contract address and ABI (replace with your contract's details)
+contract_address = "0xYourContractAddress"
+contract_abi = [
+    # Simplified example of contract ABI (you'll need the real ABI)
+    {
+        "constant": True,
+        "inputs": [{"name": "transactionHash", "type": "bytes32"}],
+        "name": "isTransactionConfirmed",
+        "outputs": [{"name": "", "type": "bool"}],
+        "payable": False,
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "constant": False,
+        "inputs": [
+            {"name": "destination", "type": "address"},
+            {"name": "amount", "type": "uint256"},
+            {"name": "signatures", "type": "bytes[]"}
+        ],
+        "name": "submitTransaction",
+        "outputs": [{"name": "", "type": "bool"}],
+        "payable": False,
+        "stateMutability": "nonpayable",
+        "type": "function"
+    }
+]
+
+# Initialize contract
+contract = w3.eth.contract(address=contract_address, abi=contract_abi)
+
+# Sample owners' private keys and addresses (use real private keys and make sure they're kept safe!)
+owner_private_keys = [
+    "0xYourPrivateKey1",
+    "0xYourPrivateKey2",
+    "0xYourPrivateKey3"
+]
+
+owner_addresses = [
+    "0xYourAddress1",
+    "0xYourAddress2",
+    "0xYourAddress3"
+]
+
+# Create account instances for owners
+owners = [Account.privateKeyToAccount(pk) for pk in owner_private_keys]
+
+# Example transaction details
+transaction = {
+    "destination": "0xRecipientAddress",
+    "amount": 1000000000000000000,  # 1 ETH in wei
+}
+
+# Function to simulate a valid multisignature transaction
+def simulate_valid_multisig_transaction():
+    print("Simulating valid multisignature transaction...")
+
+    # Assume we need 2 signatures to approve the transaction
+    signatures = []
+    
+    # Sign the transaction with the first two owners
+    for i in range(2):  # Adjust this depending on how many signatures you want to simulate
+        tx_hash = w3.solidityKeccak(
+            ['address', 'address', 'uint256'],
+            [transaction['destination'], transaction['amount'], owner_addresses[i]]
+        )
+        signature = owners[i].signHash(tx_hash)
+        signatures.append(signature.rawSignature)
+
+    # Submit the transaction
+    try:
+        tx = contract.functions.submitTransaction(
+            transaction['destination'],
+            transaction['amount'],
+            signatures
+        ).buildTransaction({
+            'from': owner_addresses[0],
+            'gas': 2000000,
+            'gasPrice': w3.toWei('20', 'gwei'),
+            'nonce': w3.eth.getTransactionCount(owner_addresses[0]),
+        })
+
+        # Sign and send the transaction
+        signed_tx = w3.eth.account.sign_transaction(tx, private_key=owner_private_keys[0])
+        tx_hash = w3.eth.sendRawTransaction(signed_tx.rawTransaction)
+        print(f"Transaction sent! Tx Hash: {tx_hash.hex()}")
+
+    except Exception as e:
+        print(f"Error sending transaction: {e}")
+
+# Function to simulate an invalid signature
+def simulate_invalid_signature():
+    print("Simulating invalid signature...")
+
+    # Invalid signature by using the wrong private key
+    invalid_owner = Account.privateKeyToAccount("0xWrongPrivateKey")
+    tx_hash = w3.solidityKeccak(
+        ['address', 'address', 'uint256'],
+        [transaction['destination'], transaction['amount'], owner_addresses[0]]
+    )
+    invalid_signature = invalid_owner.signHash(tx_hash).rawSignature
+
+    try:
+        tx = contract.functions.submitTransaction(
+            transaction['destination'],
+            transaction['amount'],
+            [invalid_signature]
+        ).buildTransaction({
+            'from': owner_addresses[0],
+            'gas': 2000000,
+            'gasPrice': w3.toWei('20', 'gwei'),
+            'nonce': w3.eth.getTransactionCount(owner_addresses[0]),
+        })
+
+        signed_tx = w3.eth.account.sign_transaction(tx, private_key=owner_private_keys[0])
+        tx_hash = w3.eth.sendRawTransaction(signed_tx.rawTransaction)
+        print(f"Transaction sent with invalid signature! Tx Hash: {tx_hash.hex()}")
+
+    except Exception as e:
+        print(f"Expected failure: {e}")
+
+# Function to test if a transaction is already executed (replay attack)
+def test_replay_attack():
+    print("Testing replay attack...")
+
+    # Assume we already have a confirmed transaction hash from a previous test
+    confirmed_tx_hash = "0xPreviousTxHash"  # Replace with a real confirmed transaction hash
+
+    # Check if the transaction was confirmed
+    is_confirmed = contract.functions.isTransactionConfirmed(confirmed_tx_hash).call()
+    
+    if is_confirmed:
+        print(f"Transaction {confirmed_tx_hash} already executed. Replay attack prevented!")
+    else:
+        print(f"Transaction {confirmed_tx_hash} not executed. Could be vulnerable to replay attack!")
+
+# Main function to run tests
+def main():
+    simulate_valid_multisig_transaction()
+    simulate_invalid_signature()
+    test_replay_attack()
+
+if __name__ == "__main__":
+    main()
